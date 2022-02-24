@@ -172,6 +172,4 @@ msf> run
 [*] Exploit completed, but no session was created.
 ############################
 
-Unfortunately, it doesn't work anymore ...
-
-TO BE CONTINUED...
+The problem was in proxies. I used my IP address in setupping on Metasploit, but I should use special ddress of machine, which was given me by TryHackMe website. So I opened AttackBox on TryHackMe network, and problem was solved!   
